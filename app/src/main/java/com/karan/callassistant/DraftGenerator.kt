@@ -37,7 +37,16 @@ object DraftGenerator {
             return Result(offline(transcript), "offline drafts")
         }
         return try {
-            Result(llm(settings, transcript, recordingNote), settings.provider.label)
+            try {
+                Result(llm(settings, transcript, recordingNote), settings.provider.label)
+            } catch (e: ModelUnavailable) {
+                // Providers retire models; pick one the key can use now and remember it.
+                val replacement = pickAvailableModel(settings) ?: throw e
+                Log.i(TAG, "Model ${settings.model} unavailable; switching to $replacement")
+                val updated = settings.copy(model = replacement)
+                updated.save(context)
+                Result(llm(updated, transcript, recordingNote), "${settings.provider.label}, $replacement")
+            }
         } catch (e: Exception) {
             Log.w(TAG, "LLM drafts failed; using offline", e)
             Result(offline(transcript), "offline drafts (${settings.provider.label} failed: ${e.message?.take(80)})")
@@ -81,11 +90,48 @@ object DraftGenerator {
             val code = conn.responseCode
             val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
                 ?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (code == 401 || code == 403) throw IllegalStateException("key rejected (HTTP $code)")
+            if ((code == 400 || code == 404) && text.contains("model", ignoreCase = true)) {
+                throw ModelUnavailable("model ${s.model} not available")
+            }
+            if (code == 429) throw IllegalStateException("free-tier rate limit hit, try again later")
             if (code !in 200..299) throw IllegalStateException("HTTP $code ${text.take(120)}")
 
             val content = JSONObject(text).getJSONArray("choices").getJSONObject(0)
                 .getJSONObject("message").getString("content")
             return parseDrafts(content)
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private class ModelUnavailable(msg: String) : Exception(msg)
+
+    /** Lists the provider's models (OpenAI-style GET /models) and picks a general chat model. */
+    private fun pickAvailableModel(s: LlmSettings): String? {
+        val url = s.endpoint.substringBeforeLast("/chat/completions", "")
+        if (url.isEmpty()) return null
+        val conn = URL("$url/models").openConnection() as HttpURLConnection
+        return try {
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 20_000
+            if (s.apiKey.isNotBlank()) conn.setRequestProperty("Authorization", "Bearer ${s.apiKey}")
+            if (conn.responseCode !in 200..299) return null
+            val data = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                .optJSONArray("data") ?: return null
+            val ids = (0 until data.length()).mapNotNull { data.optJSONObject(it)?.optString("id") }
+                .filter { id ->
+                    val l = id.lowercase()
+                    listOf("whisper", "tts", "guard", "embed", "vision", "audio", "image")
+                        .none { it in l } && id != s.model
+                }
+            val prefs = listOf(
+                { id: String -> "instant" in id }, { id: String -> "llama" in id },
+                { id: String -> "flash" in id }, { id: String -> "gemma" in id }, { _: String -> true }
+            )
+            prefs.firstNotNullOfOrNull { p -> ids.firstOrNull { p(it.lowercase()) } }
+        } catch (e: Exception) {
+            null
         } finally {
             conn.disconnect()
         }
