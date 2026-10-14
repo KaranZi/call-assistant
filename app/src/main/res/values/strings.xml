@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Call Assistant</string>
+    <string name="spike_blurb">Phase 0 spike: grant permissions, arm the monitor, then make a call (on speakerphone for both sides). After you hang up a pop-up appears with suggested follow-ups. Use Demo pop-up to test the overlay without a call.</string>
+    <string name="status_fmt">Permissions: %1$s · Overlay: %2$s</string>
+    <string name="grant_perms">1. Grant permissions</string>
+    <string name="allow_overlay">2. Allow display over other apps</string>
+    <string name="arm">Arm call monitor</string>
+    <string name="disarm">Disarm</string>
+    <string name="demo_popup">Demo pop-up</string>
+    <string name="device_check">Device &amp; capture check</string>
+    <string name="overlay_title">Follow up with %1$s</string>
+    <string name="whatsapp">WhatsApp</string>
+    <string name="telegram">Telegram</string>
+    <string name="share">Share</string>
+    <string name="close">Close</string>
+</resources>
