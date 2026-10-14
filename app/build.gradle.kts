@@ -24,9 +24,9 @@ android {
     val sharedSigning = if (keystorePath != null && file(keystorePath).exists()) {
         signingConfigs.create("shared") {
             storeFile = file(keystorePath)
-            storePassword = System.getenv("CA_STORE_PASS")
+            storePassword = System.getenv("CA_STORE_PASS")?.trim()
             keyAlias = "callassistant"
-            keyPassword = System.getenv("CA_STORE_PASS")
+            keyPassword = System.getenv("CA_STORE_PASS")?.trim()
         }
     } else null
 
