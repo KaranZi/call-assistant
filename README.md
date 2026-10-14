@@ -27,14 +27,18 @@ full scope and roadmap.
 
 ### Transcription and drafts (all free)
 - **Transcription** (`Transcriber.kt`) runs **offline on the phone** with
-  [Vosk](https://alphacephei.com/vosk/) and the small Indian English model
-  (`vosk-model-small-en-in-0.4`, ~36 MB, bundled in the APK). No key, no cost, audio never
-  leaves the phone, and the recording is deleted once transcribed. CI downloads the model
-  before building; for a local build, unzip that model into `app/src/main/assets/vosk-model/`.
-  Use **Test transcription** in the app to check it on your voice.
-- **Drafts** (`DraftGenerator.kt`) work offline by default (rule-based: picks out times, days
-  and "I'll / please / need to" phrases). For smarter drafts, choose a free-tier provider in
-  the app and paste a free key:
+  [Vosk](https://alphacephei.com/vosk/). No key, no cost, audio never leaves the phone, and
+  the recording is deleted once transcribed. Language is **Auto** by default: the first ~45 s
+  go through both the Indian English and the Hindi model and the more confident one does the
+  whole call. Mixed Hinglish is handled by whichever model wins, so expect rougher results.
+- **Speakerphone vs phone at ear**: the app samples the call's audio route. On speakerphone
+  both voices are recorded and lines are labelled by speaker; at the ear (or on a headset)
+  only your side is recorded and the transcript and drafts say so.
+- **Who said what** (`SpeakerLabeler.kt`): Vosk's speaker model fingerprints each utterance and
+  the app splits them into two voices. Record your voice once on the main screen and your
+  lines show as "You", the other person's as "Them"; otherwise "Speaker 1 / 2".
+- **Drafts** (`DraftGenerator.kt`) work offline by default (rule-based). For smarter drafts,
+  choose a free-tier provider in the app and paste a free key:
   - **Groq** (recommended): free key at console.groq.com/keys, default model
     `llama-3.1-8b-instant`.
   - **Google Gemini**: free key at aistudio.google.com/apikey, default model
@@ -42,8 +46,23 @@ full scope and roadmap.
   - **Custom**: any OpenAI-compatible `/chat/completions` URL (OpenRouter free models, or a
     local Ollama/LM Studio server on your network; key optional).
 
-  Cloud providers receive the transcript **text** only. If the call fails (no network, rate
-  limit, bad key) the app falls back to offline drafts.
+  Cloud providers receive the transcript **text** only. If the call fails the app falls back
+  to offline drafts.
+- **Call history**: every call's transcript and drafts are kept (as JSON in app storage) and
+  can be reopened and sent from the Call history screen.
+- **Stays on**: re-arms itself after a restart or update; exempt it from battery saver on the
+  main screen so Samsung doesn't stop it.
+
+### Models (local builds)
+CI downloads these into `app/src/main/assets/` before building. For a local build, unzip
+them there yourself from https://alphacephei.com/vosk/models:
+`vosk-model-small-en-in-0.4` → `vosk-model-en`, `vosk-model-small-hi-0.22` → `vosk-model-hi`,
+`vosk-model-spk-0.4` → `vosk-model-spk`.
+
+### Signing
+Every CI build is signed with the same key so updates install over the old version. The key
+comes from two repository secrets, `SIGNING_KEYSTORE_B64` (base64 of the keystore) and
+`SIGNING_PASSWORD`. Without them the build still works but uses a throwaway key.
 
 ## The one hard constraint
 
@@ -92,7 +111,12 @@ app/src/main/java/com/karan/callassistant/
   MainActivity.kt        permissions + arm/disarm + demo
   CallMonitorService.kt  foreground service, call-state detection, orchestration
   AudioRecorder.kt       mic capture to 16 kHz PCM
-  Transcriber.kt         offline speech-to-text (Vosk)
+  Transcriber.kt         offline speech-to-text (Vosk), English/Hindi auto-pick
+  SpeakerLabeler.kt      who-said-what on speakerphone calls
+  CallHistory.kt         saved transcripts + drafts
+  HistoryActivity.kt     call history list (+ CallDetailActivity)
+  BootReceiver.kt        re-arm after restart / update
+  AppSettings.kt         language, voiceprint, armed flag
   DraftGenerator.kt      follow-up drafts (offline rules or free-tier LLM) + LlmSettings
   OverlayManager.kt      post-call SYSTEM_ALERT_WINDOW pop-up
   ContactHelper.kt       caller lookup + save unknown numbers

@@ -9,4 +9,6 @@
 .externalNativeBuild/
 .cxx/
 *.apk
-/app/src/main/assets/vosk-model/
+/app/src/main/assets/vosk-model*/
+*.jks
+*.keystore

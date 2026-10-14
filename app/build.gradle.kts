@@ -13,11 +13,27 @@ android {
         // which is the whole premise of this app, and where foreground-service types apply.
         minSdk = 29
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2"
+        versionCode = 3
+        versionName = "0.3"
     }
 
+    // One fixed key for every build, so a new APK installs over the old one and keeps your
+    // settings and history. CI writes it from the SIGNING_KEYSTORE_B64 / SIGNING_PASSWORD
+    // repository secrets; without them the build falls back to a throwaway debug key.
+    val keystorePath = System.getenv("CA_KEYSTORE")
+    val sharedSigning = if (keystorePath != null && file(keystorePath).exists()) {
+        signingConfigs.create("shared") {
+            storeFile = file(keystorePath)
+            storePassword = System.getenv("CA_STORE_PASS")
+            keyAlias = "callassistant"
+            keyPassword = System.getenv("CA_STORE_PASS")
+        }
+    } else null
+
     buildTypes {
+        debug {
+            if (sharedSigning != null) signingConfig = sharedSigning
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(

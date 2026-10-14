@@ -71,19 +71,18 @@ object DeviceProbe {
         }
     }
 
-    /** Best capture source to try first: prefer whole-call, then downlink, else speakerphone mic. */
-    fun preferredSource(context: Context): Int {
-        val results = probeSources(context).associate { it.name to it.initialized }
-        return when {
-            results["VOICE_CALL (both sides)"] == true -> MediaRecorder.AudioSource.VOICE_CALL
-            results["VOICE_DOWNLINK (remote only)"] == true -> MediaRecorder.AudioSource.VOICE_DOWNLINK
-            else -> MediaRecorder.AudioSource.MIC
-        }
-    }
+    /**
+     * Capture source for calls: always the microphone. On stock Android 10+ phones VOICE_CALL
+     * and VOICE_DOWNLINK often *open* fine and then record silence, which would lose the whole
+     * call, so we no longer pick them just because they initialize. The mic gets both voices
+     * on speakerphone and your voice with the phone at your ear.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun preferredSource(context: Context): Int = MediaRecorder.AudioSource.MIC
 
     fun sourceLabel(source: Int): String = when (source) {
         MediaRecorder.AudioSource.VOICE_CALL -> "VOICE_CALL (device-level both sides)"
         MediaRecorder.AudioSource.VOICE_DOWNLINK -> "VOICE_DOWNLINK"
-        else -> "MIC (speakerphone fallback)"
+        else -> "mic"
     }
 }

@@ -30,14 +30,14 @@ object DraftGenerator {
     /** Drafts plus a short note on where they came from, shown in the pop-up. */
     data class Result(val drafts: List<Draft>, val source: String)
 
-    fun generate(context: Context, transcript: String): Result {
+    fun generate(context: Context, transcript: String, recordingNote: String = ""): Result {
         val settings = LlmSettings.load(context)
         val needsKey = settings.provider != LlmSettings.Provider.CUSTOM
         if (settings.provider == LlmSettings.Provider.OFFLINE || (needsKey && settings.apiKey.isBlank())) {
             return Result(offline(transcript), "offline drafts")
         }
         return try {
-            Result(llm(settings, transcript), settings.provider.label)
+            Result(llm(settings, transcript, recordingNote), settings.provider.label)
         } catch (e: Exception) {
             Log.w(TAG, "LLM drafts failed; using offline", e)
             Result(offline(transcript), "offline drafts (${settings.provider.label} failed: ${e.message?.take(80)})")
@@ -48,13 +48,15 @@ object DraftGenerator {
 
     // ---- free-tier LLM -------------------------------------------------------
 
-    private fun llm(s: LlmSettings, transcript: String): List<Draft> {
+    private fun llm(s: LlmSettings, transcript: String, recordingNote: String): List<Draft> {
         val prompt = """
             Below is an automatic transcript of a phone call I (the user) just finished. It may
-            contain recognition errors and may only capture one side. Write 3 short follow-up
-            messages I could send to the other person on WhatsApp: one recap of what was agreed,
-            one about the next action or time, one brief thanks. Write in first person, plain
-            and friendly, under 50 words each. Don't invent facts that aren't in the transcript.
+            contain recognition errors. $recordingNote
+            Write 3 short follow-up messages I could send to the other person on WhatsApp: one
+            recap of what was agreed, one about the next action or time, one brief thanks.
+            Write in first person, plain and friendly, under 50 words each. Match the call's
+            language: if it was in Hindi or Hinglish, write Hinglish in Roman script. Don't
+            invent facts that aren't in the transcript.
             Reply with ONLY a JSON array like [{"title":"Recap","body":"..."}].
 
             Transcript:

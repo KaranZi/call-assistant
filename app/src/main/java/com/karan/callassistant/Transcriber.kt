@@ -7,85 +7,194 @@ import org.vosk.LibVosk
 import org.vosk.LogLevel
 import org.vosk.Model
 import org.vosk.Recognizer
+import org.vosk.SpeakerModel
 import java.io.File
 import java.io.FileInputStream
+import java.io.InputStream
 
 /**
  * On-device, offline transcription with Vosk (free, open source, no key, audio never leaves
  * the phone).
  *
- * The speech model ships inside the APK under `assets/vosk-model/`. CI downloads it before the
- * build (see .github/workflows/build.yml); for a local build, unzip a model from
- * https://alphacephei.com/vosk/models into that folder yourself. Default is the small Indian
- * English model (vosk-model-small-en-in-0.4, ~36 MB).
+ * Models ship inside the APK under `assets/` (CI downloads them before the build; for a local
+ * build unzip them yourself, see README):
+ *  - `vosk-model-en`  small Indian English model
+ *  - `vosk-model-hi`  small Hindi model
+ *  - `vosk-model-spk` speaker-ID model, used to tell voices apart on speakerphone calls
  *
- * On first use the model is copied out of the APK into app storage, because Vosk loads it from
- * a real directory. That takes a few seconds once; later calls reuse the copy.
+ * On first use each model is copied out of the APK into app storage, because Vosk loads models
+ * from a real directory. That takes a few seconds once per app version.
  */
 object Transcriber {
 
     private const val TAG = "Transcriber"
-    private const val ASSET_DIR = "vosk-model"
+    private const val SPK_DIR = "vosk-model-spk"
 
-    @Volatile private var model: Model? = null
+    /** Seconds of audio used to decide between English and Hindi in Auto mode. */
+    private const val LANG_PROBE_SECONDS = 45
 
-    fun transcribe(context: Context, audioFile: File?): String {
-        if (audioFile == null || audioFile.length() == 0L) {
-            return "(No audio captured. Make sure the mic permission is granted and, for " +
-                "both-sides capture, that the call was on speakerphone.)"
+    enum class Language(val label: String, val assetDir: String) {
+        AUTO("Auto (English or Hindi)", ""),
+        ENGLISH("English (Indian accent)", "vosk-model-en"),
+        HINDI("Hindi", "vosk-model-hi")
+    }
+
+    /** One recognised utterance plus its voiceprint (null when too short to fingerprint). */
+    data class Segment(val text: String, val xvector: FloatArray?)
+
+    data class Output(val segments: List<Segment>, val language: Language) {
+        val plainText: String get() = segments.joinToString(" ") { it.text }.trim()
+    }
+
+    private val models = mutableMapOf<String, Model>()
+    private var speakerModel: SpeakerModel? = null
+
+    // ---- public API ----------------------------------------------------------
+
+    /**
+     * Transcribes 16 kHz mono PCM. Returns null when no speech model is bundled.
+     * With [withVoiceprints], each segment also carries a speaker vector for [SpeakerLabeler].
+     */
+    fun transcribe(context: Context, audioFile: File, withVoiceprints: Boolean): Output? {
+        val lang = chooseLanguage(context, audioFile) ?: return null
+        val model = loadModel(context, lang.assetDir) ?: return null
+        val spk = if (withVoiceprints) loadSpeakerModel(context) else null
+        val segments = FileInputStream(audioFile).use { recognize(model, spk, it, Long.MAX_VALUE).first }
+        return Output(segments, lang)
+    }
+
+    /**
+     * Averages the voiceprints in a recording of the user speaking alone. Saved and later used
+     * to work out which voice on a speakerphone call is "You".
+     */
+    fun voiceprint(context: Context, audioFile: File): FloatArray? {
+        val spk = loadSpeakerModel(context) ?: return null
+        val lang = AppSettings.language(context).takeIf { it != Language.AUTO } ?: Language.ENGLISH
+        val model = loadModel(context, lang.assetDir)
+            ?: loadModel(context, Language.ENGLISH.assetDir) ?: return null
+        val segments = FileInputStream(audioFile).use { recognize(model, spk, it, Long.MAX_VALUE).first }
+        return SpeakerLabeler.average(segments.mapNotNull { it.xvector })
+    }
+
+    fun hasModel(context: Context, lang: Language): Boolean =
+        context.assets.list(lang.assetDir).orEmpty().isNotEmpty()
+
+    // ---- language choice -----------------------------------------------------
+
+    private fun chooseLanguage(context: Context, audioFile: File): Language? {
+        val en = hasModel(context, Language.ENGLISH)
+        val hi = hasModel(context, Language.HINDI)
+        val wanted = AppSettings.language(context)
+        when {
+            !en && !hi -> return null
+            wanted == Language.ENGLISH && en -> return Language.ENGLISH
+            wanted == Language.HINDI && hi -> return Language.HINDI
+            !hi -> return Language.ENGLISH
+            !en -> return Language.HINDI
         }
-        val m = try {
-            loadModel(context)
-        } catch (e: Exception) {
-            Log.e(TAG, "Model load failed", e)
-            null
-        } ?: return "(Speech model missing from this build, so no transcript.)"
+        // Auto: run the first ~45 s through both models and keep whichever is more confident.
+        val limit = LANG_PROBE_SECONDS.toLong() * AudioRecorder.SAMPLE_RATE * 2
+        val enConf = probeConfidence(context, Language.ENGLISH, audioFile, limit)
+        val hiConf = probeConfidence(context, Language.HINDI, audioFile, limit)
+        Log.i(TAG, "Auto language: en=$enConf hi=$hiConf")
+        return if (hiConf > enConf) Language.HINDI else Language.ENGLISH
+    }
 
-        val recognizer = Recognizer(m, AudioRecorder.SAMPLE_RATE.toFloat())
-        val text = StringBuilder()
-        try {
-            FileInputStream(audioFile).use { input ->
-                val buf = ByteArray(8192)
-                while (true) {
-                    val n = input.read(buf)
-                    if (n <= 0) break
-                    if (recognizer.acceptWaveForm(buf, n)) appendText(text, recognizer.result)
+    private fun probeConfidence(context: Context, lang: Language, file: File, limit: Long): Double {
+        val model = loadModel(context, lang.assetDir) ?: return 0.0
+        return FileInputStream(file).use { recognize(model, null, it, limit).second }
+    }
+
+    // ---- recognition ---------------------------------------------------------
+
+    /** Returns the segments and the mean per-word confidence. */
+    private fun recognize(
+        model: Model,
+        spk: SpeakerModel?,
+        input: InputStream,
+        maxBytes: Long
+    ): Pair<List<Segment>, Double> {
+        val recognizer = Recognizer(model, AudioRecorder.SAMPLE_RATE.toFloat())
+        recognizer.setWords(true)
+        if (spk != null) recognizer.setSpeakerModel(spk)
+
+        val segments = mutableListOf<Segment>()
+        var confSum = 0.0
+        var words = 0
+        fun collect(json: String) {
+            val o = JSONObject(json)
+            val text = o.optString("text").trim()
+            if (text.isEmpty()) return
+            o.optJSONArray("result")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    confSum += arr.getJSONObject(i).optDouble("conf", 0.0)
+                    words++
                 }
             }
-            appendText(text, recognizer.finalResult)
+            val vec = o.optJSONArray("spk")?.let { a -> FloatArray(a.length()) { a.getDouble(it).toFloat() } }
+            segments += Segment(text, vec)
+        }
+
+        try {
+            val buf = ByteArray(8192)
+            var read = 0L
+            while (read < maxBytes) {
+                val n = input.read(buf)
+                if (n <= 0) break
+                read += n
+                if (recognizer.acceptWaveForm(buf, n)) collect(recognizer.result)
+            }
+            collect(recognizer.finalResult)
         } finally {
             recognizer.close()
         }
-        return text.toString().trim().ifEmpty { "(No speech recognised in the recording.)" }
+        return segments to (if (words == 0) 0.0 else confSum / words)
     }
 
-    /** True once the bundled model can be loaded; also warms it up so the first call is fast. */
-    fun isReady(context: Context): Boolean =
-        try { loadModel(context) != null } catch (e: Exception) { false }
+    // ---- model loading -------------------------------------------------------
 
-    private fun appendText(sb: StringBuilder, json: String) {
-        val t = JSONObject(json).optString("text")
-        if (t.isNotBlank()) sb.append(t).append(' ')
+    @Synchronized
+    private fun loadModel(context: Context, assetDir: String): Model? {
+        models[assetDir]?.let { return it }
+        val dir = unpack(context, assetDir) ?: return null
+        return try {
+            Model(dir.absolutePath).also { models[assetDir] = it }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load $assetDir", e)
+            null
+        }
     }
 
     @Synchronized
-    private fun loadModel(context: Context): Model? {
-        model?.let { return it }
-        if (context.assets.list(ASSET_DIR).isNullOrEmpty()) return null
-        LibVosk.setLogLevel(LogLevel.WARNINGS)
+    private fun loadSpeakerModel(context: Context): SpeakerModel? {
+        speakerModel?.let { return it }
+        val dir = unpack(context, SPK_DIR) ?: return null
+        return try {
+            SpeakerModel(dir.absolutePath).also { speakerModel = it }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load speaker model", e)
+            null
+        }
+    }
 
-        // Re-copy whenever the app is updated, in case the bundled model changed.
+    /** Copies an asset model folder to app storage once per app version. */
+    private fun unpack(context: Context, assetDir: String): File? {
+        if (context.assets.list(assetDir).isNullOrEmpty()) return null
+        LibVosk.setLogLevel(LogLevel.WARNINGS)
         val version = context.packageManager
             .getPackageInfo(context.packageName, 0).longVersionCode
-        val target = File(context.filesDir, "$ASSET_DIR-$version")
+        val target = File(context.filesDir, "$assetDir-v$version")
         val marker = File(target, ".complete")
         if (!marker.exists()) {
-            context.filesDir.listFiles { f -> f.name.startsWith("$ASSET_DIR-") }
+            // Drop copies left by older app versions (they can be tens of MB each).
+            context.filesDir.listFiles()
+                ?.filter { it.name.startsWith("vosk-model") && !it.name.endsWith("-v$version") }
                 ?.forEach { it.deleteRecursively() }
-            copyAssetDir(context, ASSET_DIR, target)
+            target.deleteRecursively()
+            copyAssetDir(context, assetDir, target)
             marker.createNewFile()
         }
-        return Model(target.absolutePath).also { model = it }
+        return target
     }
 
     private fun copyAssetDir(context: Context, assetPath: String, dest: File) {

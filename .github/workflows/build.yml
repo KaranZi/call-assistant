@@ -23,16 +23,36 @@ jobs:
         with:
           packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
 
-      - name: Download offline speech model (Vosk, Indian English)
+      - name: Download offline speech models (Vosk)
         run: |
-          curl -fsSL -o model.zip https://alphacephei.com/vosk/models/vosk-model-small-en-in-0.4.zip
-          unzip -q model.zip
+          set -e
           mkdir -p app/src/main/assets
-          rm -rf app/src/main/assets/vosk-model
-          mv vosk-model-small-en-in-0.4 app/src/main/assets/vosk-model
-          rm model.zip
+          fetch() {  # fetch <zip name> <asset folder>
+            curl -fsSL -o m.zip "https://alphacephei.com/vosk/models/$1.zip"
+            unzip -q m.zip
+            rm -rf "app/src/main/assets/$2"
+            mv "$1" "app/src/main/assets/$2"
+            rm m.zip
+          }
+          fetch vosk-model-small-en-in-0.4 vosk-model-en
+          fetch vosk-model-small-hi-0.22 vosk-model-hi
+          fetch vosk-model-spk-0.4 vosk-model-spk
+          du -sh app/src/main/assets/*
+
+      - name: Restore signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/callassistant.jks"
+            echo "CA_KEYSTORE=$RUNNER_TEMP/callassistant.jks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::SIGNING_KEYSTORE_B64 secret not set; APK uses a throwaway key and won't install over older builds."
+          fi
 
       - name: Build debug APK
+        env:
+          CA_STORE_PASS: ${{ secrets.SIGNING_PASSWORD }}
         run: chmod +x gradlew && ./gradlew :app:assembleDebug --no-daemon
 
       - name: Upload APK

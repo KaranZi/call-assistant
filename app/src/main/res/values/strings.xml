@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Call Assistant</string>
-    <string name="spike_blurb">Grant permissions, arm the monitor, then make a call (on speakerphone for both sides). After you hang up, the call is transcribed on the phone and a pop-up suggests follow-up messages. Use Demo pop-up to test the overlay without a call.</string>
-    <string name="status_fmt">Permissions: %1$s · Overlay: %2$s</string>
+    <string name="spike_blurb">Grant permissions, allow the overlay, exempt from battery saver, then arm the monitor. It stays on after restarts. Speakerphone records both voices; with the phone at your ear only your side is recorded. After you hang up, the call is transcribed on the phone and a pop-up suggests follow-up messages. Use Demo pop-up to test the overlay without a call.</string>
+    <string name="status_fmt">Permissions: %1$s · Overlay: %2$s · Battery: %3$s · Monitor: %4$s</string>
     <string name="grant_perms">1. Grant permissions</string>
     <string name="allow_overlay">2. Allow display over other apps</string>
     <string name="arm">Arm call monitor</string>
@@ -23,4 +23,10 @@
     <string name="url_hint">Custom endpoint URL (…/chat/completions)</string>
     <string name="get_key">Get a free key for this provider</string>
     <string name="save_test_drafts">Save and test drafts</string>
+    <string name="battery_exempt">3. Exempt from battery saver</string>
+    <string name="call_history">Call history</string>
+    <string name="record_voice">Record my voice (15 seconds)</string>
+    <string name="voice_blurb">Do this once so speakerphone calls can label your lines as \"You\" and the other person\'s as \"Them\". Without it they show as Speaker 1 and Speaker 2.</string>
+    <string name="history_empty">No calls yet. Calls appear here after the pop-up.</string>
+    <string name="delete">Delete</string>
 </resources>

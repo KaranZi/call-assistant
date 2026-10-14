@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.view.View
 import android.widget.AdapterView
@@ -50,17 +51,86 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.demoButton).setOnClickListener { demoPopup() }
         findViewById<Button>(R.id.probeButton).setOnClickListener { runDeviceCheck() }
         findViewById<Button>(R.id.testTranscribeButton).setOnClickListener { testTranscription() }
+        findViewById<Button>(R.id.voiceprintButton).setOnClickListener { recordVoiceprint() }
+        findViewById<Button>(R.id.batteryButton).setOnClickListener { requestBatteryExemption() }
+        findViewById<Button>(R.id.historyButton).setOnClickListener {
+            startActivity(Intent(this, HistoryActivity::class.java))
+        }
+        setUpLanguagePicker()
         setUpDraftSettings()
+        if (intent?.action == ACTION_REARM) armService()
     }
+
+    private fun setUpLanguagePicker() {
+        val spinner = findViewById<Spinner>(R.id.languageSpinner)
+        val langs = Transcriber.Language.values()
+        spinner.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_dropdown_item, langs.map { it.label }
+        )
+        spinner.setSelection(langs.indexOf(AppSettings.language(this)))
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, pos: Int, id: Long) =
+                AppSettings.setLanguage(this@MainActivity, langs[pos])
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
+    /** Lets Samsung's battery saver leave the monitor alone while the screen is off. */
+    @android.annotation.SuppressLint("BatteryLife") // personal sideloaded app, not Play Store
+    private fun requestBatteryExemption() {
+        val pm = getSystemService(PowerManager::class.java)
+        if (pm.isIgnoringBatteryOptimizations(packageName)) {
+            Toast.makeText(this, "Already exempt from battery saver", Toast.LENGTH_SHORT).show()
+            return
+        }
+        startActivity(
+            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))
+        )
+    }
+
+    /** Records 15 s of the user talking alone and saves their voiceprint for speaker labels. */
+    private fun recordVoiceprint() {
+        val out = findViewById<TextView>(R.id.voiceprintText)
+        if (!hasMicPermission()) {
+            out.text = "Grant permissions first."
+            return
+        }
+        val button = findViewById<Button>(R.id.voiceprintButton)
+        button.isEnabled = false
+        out.text = "Recording… keep talking normally for 15 seconds (read anything aloud)."
+        val file = File(cacheDir, "voice_${System.currentTimeMillis()}.pcm")
+        val rec = AudioRecorder(file).also { it.start() }
+        Handler(Looper.getMainLooper()).postDelayed({
+            val audio = rec.stop()
+            out.text = "Analysing your voice…"
+            thread {
+                val vp = try {
+                    audio?.let { Transcriber.voiceprint(this, it) }
+                } catch (e: Exception) {
+                    null
+                }
+                audio?.delete()
+                if (vp != null) AppSettings.setVoiceprint(this, vp)
+                runOnUiThread {
+                    out.text = if (vp != null) "Voice saved. Speakerphone calls will mark your lines as \"You\"."
+                    else "Couldn't get a clear voiceprint. Try again somewhere quiet and talk the whole time."
+                    button.isEnabled = true
+                }
+            }
+        }, 15000)
+    }
+
+    private fun hasMicPermission() =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
 
     // ---- transcription self-test ---------------------------------------------
 
     /** Records 5 s from the mic and runs it through the same offline engine calls use. */
     private fun testTranscription() {
         val out = findViewById<TextView>(R.id.transcribeText)
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
-            android.content.pm.PackageManager.PERMISSION_GRANTED
-        ) {
+        if (!hasMicPermission()) {
             out.text = "Grant permissions first."
             return
         }
@@ -74,7 +144,13 @@ class MainActivity : AppCompatActivity() {
             out.text = "Transcribing… (the first run unpacks the speech model, a few seconds)"
             thread {
                 val text = try {
-                    Transcriber.transcribe(this, audio)
+                    val result = audio?.let { Transcriber.transcribe(this, it, withVoiceprints = false) }
+                    when {
+                        audio == null -> "(no audio captured)"
+                        result == null -> "(speech model missing from this build)"
+                        result.segments.isEmpty() -> "(nothing recognised; ${result.language.label})"
+                        else -> "${result.plainText}\n[${result.language.label}]"
+                    }
                 } catch (e: Exception) {
                     "Failed: ${e.message}"
                 }
@@ -206,6 +282,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Grant permissions first", Toast.LENGTH_SHORT).show()
             return
         }
+        AppSettings.setArmed(this, true)
         ContextCompat.startForegroundService(
             this,
             Intent(this, CallMonitorService::class.java).setAction(CallMonitorService.ACTION_ARM)
@@ -214,6 +291,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun disarmService() {
+        AppSettings.setArmed(this, false)
         startService(
             Intent(this, CallMonitorService::class.java).setAction(CallMonitorService.ACTION_DISARM)
         )
@@ -235,6 +313,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        const val ACTION_REARM = "com.karan.callassistant.REARM"
         private const val SAMPLE_TRANSCRIPT =
             "yes so i'll send you the quotation by tonight and we can meet on friday at 4 pm " +
                 "to finalise the order please bring the samples"
@@ -248,6 +327,10 @@ class MainActivity : AppCompatActivity() {
     private fun refreshStatus() {
         val overlay = if (Settings.canDrawOverlays(this)) "granted" else "MISSING"
         val perms = if (hasAllRuntimePermissions()) "granted" else "MISSING"
-        statusText.text = getString(R.string.status_fmt, perms, overlay)
+        val battery = if (getSystemService(PowerManager::class.java)
+                .isIgnoringBatteryOptimizations(packageName)
+        ) "exempt" else "MISSING"
+        val armed = if (AppSettings.armed(this)) "ON" else "off"
+        statusText.text = getString(R.string.status_fmt, perms, overlay, battery, armed)
     }
 }

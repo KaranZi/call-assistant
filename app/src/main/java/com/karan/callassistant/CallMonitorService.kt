@@ -8,8 +8,12 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.telephony.PhoneStateListener
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
@@ -39,6 +43,19 @@ class CallMonitorService : Service() {
 
     private val worker = Executors.newSingleThreadExecutor()
 
+    // Speakerphone tracking: sampled every couple of seconds while a call is active.
+    private val handler = Handler(Looper.getMainLooper())
+    private var routeSamples = 0
+    private var speakerSamples = 0
+    private var headsetSamples = 0
+    private val routeSampler = object : Runnable {
+        override fun run() {
+            if (!callActive) return
+            sampleRoute()
+            handler.postDelayed(this, 2000)
+        }
+    }
+
     // API 31+ listener
     private var telephonyCallback: TelephonyCallback? = null
     // < API 31 listener
@@ -53,11 +70,17 @@ class CallMonitorService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_ARM -> arm()
+            ACTION_ARM -> {
+                AppSettings.setArmed(this, true)
+                arm()
+            }
             ACTION_DISARM -> {
+                AppSettings.setArmed(this, false)
                 disarm()
                 stopSelf()
             }
+            // Restarted by the system after being killed: carry on if the user left it armed.
+            null -> if (AppSettings.armed(this)) arm() else stopSelf()
         }
         return START_STICKY
     }
@@ -136,6 +159,10 @@ class CallMonitorService : Service() {
         captureSourceLabel = DeviceProbe.sourceLabel(source)
         val outFile = File(cacheDir, "call_${System.currentTimeMillis()}.pcm")
         recorder = AudioRecorder(outFile, source).also { it.start() }
+        routeSamples = 0
+        speakerSamples = 0
+        headsetSamples = 0
+        handler.post(routeSampler)
         Log.i(TAG, "Call started; source=$captureSourceLabel; recording to ${outFile.name}")
     }
 
@@ -148,16 +175,64 @@ class CallMonitorService : Service() {
 
         val peak = rec?.peakAmplitude ?: 0
         val audioFile = rec?.stop()
-        val label = captureSourceLabel
-        Log.i(TAG, "Call ended; audio=${audioFile?.name}; source=$label; peak=$peak")
+        handler.removeCallbacks(routeSampler)
+        val mode = when {
+            routeSamples == 0 -> CaptureMode.EARPIECE
+            speakerSamples * 2 >= routeSamples -> CaptureMode.SPEAKER
+            headsetSamples * 2 >= routeSamples -> CaptureMode.HEADSET
+            else -> CaptureMode.EARPIECE
+        }
+        Log.i(TAG, "Call ended; audio=${audioFile?.name}; mode=$mode; peak=$peak")
 
-        worker.execute { processCall(audioFile, number, label, peak) }
+        worker.execute { processCall(audioFile, number, mode, peak) }
     }
 
-    private fun processCall(audioFile: File?, number: String?, sourceLabel: String, peak: Int) {
+    /** Where the call audio was going, which decides what the mic could hear. */
+    enum class CaptureMode(val note: String) {
+        SPEAKER("speakerphone"),
+        EARPIECE("phone at ear: your side only"),
+        HEADSET("headset: mostly your side only")
+    }
+
+    /** Samples the current call audio route (speaker / headset / earpiece). */
+    private fun sampleRoute() {
+        val am = getSystemService(AudioManager::class.java)
+        routeSamples++
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) am.communicationDevice?.type else null
+        @Suppress("DEPRECATION")
+        when {
+            type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER || am.isSpeakerphoneOn -> speakerSamples++
+            type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES || type == AudioDeviceInfo.TYPE_USB_HEADSET ||
+                am.isBluetoothScoOn -> headsetSamples++
+        }
+    }
+
+    private fun processCall(audioFile: File?, number: String?, mode: CaptureMode, peak: Int) {
         // 1. Transcribe on-device with Vosk (offline, free; audio stays on the phone).
+        var language = ""
         val transcript = try {
-            Transcriber.transcribe(this, audioFile)
+            when {
+                audioFile == null -> "(No audio captured. Check the microphone permission.)"
+                else -> {
+                    val speaker = mode == CaptureMode.SPEAKER
+                    val out = Transcriber.transcribe(this, audioFile, withVoiceprints = speaker)
+                    when {
+                        out == null -> "(Speech model missing from this build, so no transcript.)"
+                        out.segments.isEmpty() -> "(No speech recognised in the recording.)"
+                        else -> {
+                            language = out.language.label
+                            if (speaker) {
+                                val labels = SpeakerLabeler.label(out.segments, AppSettings.voiceprint(this))
+                                SpeakerLabeler.format(out.segments, labels)
+                            } else {
+                                // With the phone at your ear the mic only hears you.
+                                "${SpeakerLabeler.YOU}: ${out.plainText}"
+                            }
+                        }
+                    }
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Transcription failed", e)
             "(Transcription failed: ${e.message})"
@@ -166,7 +241,12 @@ class CallMonitorService : Service() {
         audioFile?.delete()
 
         // 2. Drafts: free-tier LLM if a key is set in the app, else offline rule-based drafts.
-        val result = DraftGenerator.generate(this, transcript)
+        val recordingNote = when (mode) {
+            CaptureMode.SPEAKER -> "The call was on speakerphone, so both voices were recorded. " +
+                "Lines are labelled by speaker (\"You\" is me when known)."
+            else -> "Only my side of the call was recorded; the other person's words are missing."
+        }
+        val result = DraftGenerator.generate(this, transcript, recordingNote)
         val drafts = result.drafts
 
         // 3. Resolve the contact label, and offer to save the number if unknown.
@@ -175,18 +255,24 @@ class CallMonitorService : Service() {
             ContactHelper.maybeSaveUnknown(this, number)
         }
 
-        // Capture diagnostic: proves on a real call whether the chosen source actually
-        // picked up sound (peak > ~500 ≈ real audio; ~0 = silent source, so it fell through).
-        val captureLine = "[capture: $sourceLabel · peak $peak" +
-            (if (peak < 500) " → looks SILENT, likely needs speakerphone" else "") +
-            " · ${result.source}]"
+        // Capture diagnostic shown above the transcript.
+        val silent = peak < 500
+        val captureNote = listOf(
+            mode.note + if (silent) " (very quiet: check mic permission)" else "",
+            language,
+            result.source
+        ).filter { it.isNotBlank() }.joinToString(" · ")
 
-        // 4. Show the post-call overlay on the main thread.
+        // 4. Save to history, then show the post-call overlay on the main thread.
+        CallHistory.save(
+            this,
+            CallHistory.Record(System.currentTimeMillis(), number ?: "", label, captureNote, transcript, drafts)
+        )
         mainExecutor.execute {
             OverlayManager(applicationContext).show(
                 contactLabel = label,
                 number = number ?: "Unknown",
-                transcriptPreview = "$captureLine\n$transcript",
+                transcriptPreview = "[$captureNote]\n$transcript",
                 drafts = drafts
             )
         }
@@ -221,6 +307,7 @@ class CallMonitorService : Service() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(routeSampler)
         disarm()
         worker.shutdown()
         super.onDestroy()
