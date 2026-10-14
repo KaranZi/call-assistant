@@ -126,8 +126,9 @@ object DraftGenerator {
                         .none { it in l } && id != s.model
                 }
             val prefs = listOf(
-                { id: String -> "instant" in id }, { id: String -> "llama" in id },
-                { id: String -> "flash" in id }, { id: String -> "gemma" in id }, { _: String -> true }
+                { id: String -> "gpt-oss-20b" in id }, { id: String -> "gpt-oss" in id },
+                { id: String -> "flash" in id }, { id: String -> "llama" in id },
+                { id: String -> "qwen" in id }, { _: String -> true }
             )
             prefs.firstNotNullOfOrNull { p -> ids.firstOrNull { p(it.lowercase()) } }
         } catch (e: Exception) {
@@ -206,7 +207,7 @@ data class LlmSettings(
         GROQ(
             "Groq (free key)",
             "https://api.groq.com/openai/v1/chat/completions",
-            "llama-3.1-8b-instant",
+            "openai/gpt-oss-20b",
             "https://console.groq.com/keys"
         ),
         GEMINI(

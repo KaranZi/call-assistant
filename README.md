@@ -40,7 +40,8 @@ full scope and roadmap.
 - **Drafts** (`DraftGenerator.kt`) work offline by default (rule-based). For smarter drafts,
   choose a free-tier provider in the app and paste a free key:
   - **Groq** (recommended): free key at console.groq.com/keys, default model
-    `llama-3.1-8b-instant`.
+    `openai/gpt-oss-20b` (Groq retired the Llama 3.1 8B model in Aug 2026; the app
+    switches to another available model by itself if this one is retired too).
   - **Google Gemini**: free key at aistudio.google.com/apikey, default model
     `gemini-flash-latest`. Google may use free-tier data to improve its products.
   - **Custom**: any OpenAI-compatible `/chat/completions` URL (OpenRouter free models, or a
