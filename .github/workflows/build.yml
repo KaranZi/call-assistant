@@ -42,7 +42,11 @@ jobs:
       - name: Restore signing key
         env:
           KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+          STORE_PASS: ${{ secrets.SIGNING_PASSWORD }}
         run: |
+          # Length and first character only, so a mis-pasted password is easy to spot.
+          P="$(printf %s "$STORE_PASS" | tr -d '[:space:]')"
+          echo "SIGNING_PASSWORD: ${#P} characters (expected 24), starts with dash: $([ "${P:0:1}" = "-" ] && echo yes || echo no)"
           if [ -n "$KEYSTORE_B64" ]; then
             echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/callassistant.jks"
             echo "CA_KEYSTORE=$RUNNER_TEMP/callassistant.jks" >> "$GITHUB_ENV"
