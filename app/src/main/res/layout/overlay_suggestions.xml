@@ -27,6 +27,31 @@
         android:paddingBottom="12dp" />
 
     <LinearLayout
+        android:id="@+id/saveContactRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        android:paddingBottom="12dp"
+        android:gravity="center_vertical">
+
+        <EditText
+            android:id="@+id/contactNameInput"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:hint="@string/save_contact_hint"
+            android:inputType="textPersonName|textCapWords"
+            android:importantForAutofill="no" />
+
+        <Button
+            android:id="@+id/btnSaveContact"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/save_contact" />
+    </LinearLayout>
+
+    <LinearLayout
         android:id="@+id/draftsContainer"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

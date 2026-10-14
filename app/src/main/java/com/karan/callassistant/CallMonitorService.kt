@@ -237,11 +237,9 @@ class CallMonitorService : Service() {
         val result = DraftGenerator.generate(this, transcript, recordingNote)
         val drafts = result.drafts
 
-        // 3. Resolve the contact label, and offer to save the number if unknown.
+        // 3. Resolve the contact label; the pop-up offers to save the number if it's unknown.
         val label = ContactHelper.labelForNumber(this, number)
-        if (number != null && !ContactHelper.isKnown(this, number)) {
-            ContactHelper.maybeSaveUnknown(this, number)
-        }
+        val numberKnown = number != null && ContactHelper.isKnown(this, number)
 
         // Capture diagnostic shown above the transcript.
         val silent = peak < 500
@@ -261,6 +259,7 @@ class CallMonitorService : Service() {
             OverlayManager(applicationContext).show(
                 contactLabel = label,
                 number = number ?: "Unknown",
+                numberKnown = numberKnown,
                 transcriptPreview = "[$captureNote]\n$transcript",
                 drafts = drafts
             )

@@ -29,4 +29,8 @@
     <string name="voice_blurb">Do this once so speakerphone calls can label your lines as \"You\" and the other person\'s as \"Them\". Without it they show as Speaker 1 and Speaker 2.</string>
     <string name="history_empty">No calls yet. Calls appear here after the pop-up.</string>
     <string name="delete">Delete</string>
+    <string name="save_contact">Save</string>
+    <string name="save_contact_hint">Save this number — name</string>
+    <string name="contact_saved">Saved to contacts</string>
+    <string name="contact_save_failed">Couldn\'t save (allow Contacts permission)</string>
 </resources>

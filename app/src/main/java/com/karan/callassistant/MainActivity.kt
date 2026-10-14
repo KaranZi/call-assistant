@@ -301,9 +301,11 @@ class MainActivity : AppCompatActivity() {
             return
         }
         OverlayManager(applicationContext).show(
-            contactLabel = "Demo contact",
+            contactLabel = "Unknown (+10000000000)",
             number = "+10000000000",
-            transcriptPreview = "This is a sample transcript so you can see the pop-up.",
+            numberKnown = false,
+            transcriptPreview = "This is a sample transcript so you can see the pop-up, " +
+                "including the Save-to-contacts row for an unknown number.",
             drafts = DraftGenerator.sampleDrafts()
         )
     }

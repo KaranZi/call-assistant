@@ -18,7 +18,7 @@ full scope and roadmap.
   Android 10 restriction below.
 - **Post-call pop-up** — an overlay (`SYSTEM_ALERT_WINDOW`) appears after you hang up with
   the suggested drafts and WhatsApp / Telegram / Share buttons.
-- **Contacts** — resolves the caller against your address book and saves unknown numbers.
+- **Contacts** — resolves the caller against your address book. Unknown numbers get a Save-to-contacts row inside the pop-up (type a name, tap Save); the pop-up stays open. Tapping a messaging button sends the draft and closes the pop-up.
 - **Demo button** — fires the pop-up without a real call, so you can test the overlay fast.
 - **Device & capture check** — reports this phone's make/model/Android version and which call-audio
   sources actually initialize on it, then a single real call confirms whether the chosen source

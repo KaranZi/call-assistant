@@ -53,11 +53,13 @@ object ContactHelper {
     }
 
     /**
-     * Saves an unknown caller as a new raw contact named after the number.
-     * Phase 4 can replace the auto-name with a prompt in the overlay.
+     * Saves a caller as a new contact with the name the user typed in the pop-up.
+     * Returns true on success. Falls back to the number itself when no name is given.
      */
-    fun maybeSaveUnknown(context: Context, number: String) {
-        if (!has(context, android.Manifest.permission.WRITE_CONTACTS)) return
+    fun saveContact(context: Context, name: String, number: String): Boolean {
+        if (!has(context, android.Manifest.permission.WRITE_CONTACTS)) return false
+        if (number.isBlank()) return false
+        val displayName = name.trim().ifBlank { number }
         val ops = arrayListOf(
             ContentProviderOperation.newInsert(ContactsContract.RawContacts.CONTENT_URI)
                 .withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, null)
@@ -71,7 +73,7 @@ object ContactHelper {
                 )
                 .withValue(
                     ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME,
-                    "Call Assistant: $number"
+                    displayName
                 )
                 .build(),
             ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
@@ -87,11 +89,13 @@ object ContactHelper {
                 )
                 .build()
         )
-        try {
+        return try {
             context.contentResolver.applyBatch(ContactsContract.AUTHORITY, ops)
-            Log.i(TAG, "Saved unknown caller $number")
+            Log.i(TAG, "Saved contact $displayName")
+            true
         } catch (e: Exception) {
             Log.w(TAG, "Failed to save contact", e)
+            false
         }
     }
 
