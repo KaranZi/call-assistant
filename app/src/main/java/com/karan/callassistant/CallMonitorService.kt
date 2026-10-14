@@ -209,29 +209,17 @@ class CallMonitorService : Service() {
     }
 
     private fun processCall(audioFile: File?, number: String?, mode: CaptureMode, peak: Int) {
-        // 1. Transcribe on-device with Vosk (offline, free; audio stays on the phone).
+        // 1. Transcribe: Groq Whisper when a Groq key is saved, else offline Vosk.
         var language = ""
+        var engine = ""
         val transcript = try {
-            when {
-                audioFile == null -> "(No audio captured. Check the microphone permission.)"
-                else -> {
-                    val speaker = mode == CaptureMode.SPEAKER
-                    val out = Transcriber.transcribe(this, audioFile, withVoiceprints = speaker)
-                    when {
-                        out == null -> "(Speech model missing from this build, so no transcript.)"
-                        out.segments.isEmpty() -> "(No speech recognised in the recording.)"
-                        else -> {
-                            language = out.language.label
-                            if (speaker) {
-                                val labels = SpeakerLabeler.label(out.segments, AppSettings.voiceprint(this))
-                                SpeakerLabeler.format(out.segments, labels)
-                            } else {
-                                // With the phone at your ear the mic only hears you.
-                                "${SpeakerLabeler.YOU}: ${out.plainText}"
-                            }
-                        }
-                    }
-                }
+            if (audioFile == null) {
+                "(No audio captured. Check the microphone permission.)"
+            } else {
+                val out = CallTranscription.run(this, audioFile, speaker = mode == CaptureMode.SPEAKER)
+                language = out.language
+                engine = out.engine
+                out.text
             }
         } catch (e: Exception) {
             Log.e(TAG, "Transcription failed", e)
@@ -260,6 +248,7 @@ class CallMonitorService : Service() {
         val captureNote = listOf(
             mode.note + if (silent) " (very quiet: check mic permission)" else "",
             language,
+            engine,
             result.source
         ).filter { it.isNotBlank() }.joinToString(" · ")
 

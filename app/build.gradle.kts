@@ -13,8 +13,8 @@ android {
         // which is the whole premise of this app, and where foreground-service types apply.
         minSdk = 29
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.3"
+        versionCode = 4
+        versionName = "0.4"
     }
 
     // One fixed key for every build, so a new APK installs over the old one and keeps your

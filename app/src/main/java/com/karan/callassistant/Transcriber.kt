@@ -39,8 +39,16 @@ object Transcriber {
         HINDI("Hindi", "vosk-model-hi")
     }
 
-    /** One recognised utterance plus its voiceprint (null when too short to fingerprint). */
-    data class Segment(val text: String, val xvector: FloatArray?)
+    /**
+     * One recognised utterance plus its voiceprint (null when too short to fingerprint) and its
+     * time span in seconds (used to line up cloud transcripts with offline speaker labels).
+     */
+    data class Segment(
+        val text: String,
+        val xvector: FloatArray?,
+        val start: Double = 0.0,
+        val end: Double = 0.0
+    )
 
     data class Output(val segments: List<Segment>, val language: Language) {
         val plainText: String get() = segments.joinToString(" ") { it.text }.trim()
@@ -55,8 +63,14 @@ object Transcriber {
      * Transcribes 16 kHz mono PCM. Returns null when no speech model is bundled.
      * With [withVoiceprints], each segment also carries a speaker vector for [SpeakerLabeler].
      */
-    fun transcribe(context: Context, audioFile: File, withVoiceprints: Boolean): Output? {
-        val lang = chooseLanguage(context, audioFile) ?: return null
+    fun transcribe(
+        context: Context,
+        audioFile: File,
+        withVoiceprints: Boolean,
+        forceLanguage: Language? = null
+    ): Output? {
+        val lang = forceLanguage?.takeIf { hasModel(context, it) }
+            ?: chooseLanguage(context, audioFile) ?: return null
         val model = loadModel(context, lang.assetDir) ?: return null
         val spk = if (withVoiceprints) loadSpeakerModel(context) else null
         val segments = FileInputStream(audioFile).use { recognize(model, spk, it, Long.MAX_VALUE).first }
@@ -125,14 +139,20 @@ object Transcriber {
             val o = JSONObject(json)
             val text = o.optString("text").trim()
             if (text.isEmpty()) return
+            var start = 0.0
+            var end = 0.0
             o.optJSONArray("result")?.let { arr ->
                 for (i in 0 until arr.length()) {
                     confSum += arr.getJSONObject(i).optDouble("conf", 0.0)
                     words++
                 }
+                if (arr.length() > 0) {
+                    start = arr.getJSONObject(0).optDouble("start", 0.0)
+                    end = arr.getJSONObject(arr.length() - 1).optDouble("end", start)
+                }
             }
             val vec = o.optJSONArray("spk")?.let { a -> FloatArray(a.length()) { a.getDouble(it).toFloat() } }
-            segments += Segment(text, vec)
+            segments += Segment(text, vec, start, end)
         }
 
         try {

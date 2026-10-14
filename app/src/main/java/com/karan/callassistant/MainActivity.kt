@@ -144,13 +144,9 @@ class MainActivity : AppCompatActivity() {
             out.text = "Transcribing… (the first run unpacks the speech model, a few seconds)"
             thread {
                 val text = try {
-                    val result = audio?.let { Transcriber.transcribe(this, it, withVoiceprints = false) }
-                    when {
-                        audio == null -> "(no audio captured)"
-                        result == null -> "(speech model missing from this build)"
-                        result.segments.isEmpty() -> "(nothing recognised; ${result.language.label})"
-                        else -> "${result.plainText}\n[${result.language.label}]"
-                    }
+                    val result = audio?.let { CallTranscription.run(this, it, speaker = false) }
+                    if (result == null) "(no audio captured)"
+                    else "${result.text.removePrefix("${SpeakerLabeler.YOU}: ")}\n[${result.language} · ${result.engine}]"
                 } catch (e: Exception) {
                     "Failed: ${e.message}"
                 }

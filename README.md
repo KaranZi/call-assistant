@@ -26,7 +26,12 @@ full scope and roadmap.
   whether device-level both-sides capture works on your specific phone vs. needing speakerphone.
 
 ### Transcription and drafts (all free)
-- **Transcription** (`Transcriber.kt`) runs **offline on the phone** with
+- **Groq for everything (when a Groq key is saved)**: calls are transcribed with Whisper on
+  Groq's free tier (`CloudTranscriber.kt`, `whisper-large-v3`, falling back to
+  `whisper-large-v3-turbo`) and replies are written by Groq too. This sends the call audio to
+  Groq. Speaker labels still come from the offline speaker model, lined up with Whisper's
+  segments by time (`CallTranscription.kt`). If Groq fails, the offline engine below is used.
+- **Offline transcription** (`Transcriber.kt`) runs on the phone with
   [Vosk](https://alphacephei.com/vosk/). No key, no cost, audio never leaves the phone, and
   the recording is deleted once transcribed. Language is **Auto** by default: the first ~45 s
   go through both the Indian English and the Hindi model and the more confident one does the
