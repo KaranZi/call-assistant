@@ -1,4 +1,4 @@
-# Call Assistant — Phase 0 spike
+# Call Assistant
 
 A personal Android app for **your own device and your own calls**: it detects when a call
 starts and ends, records the call audio, and after you hang up shows a pop-up with suggested
@@ -25,13 +25,25 @@ full scope and roadmap.
   captured the remote party (the pop-up shows the captured signal level). This is how we find out
   whether device-level both-sides capture works on your specific phone vs. needing speakerphone.
 
-### Placeholders wired for the next phases
-- **Transcription** (`Transcriber.kt`) returns a placeholder. Phase 1 drops in an open-source
-  **on-device** engine (whisper.cpp or Vosk) so audio never leaves the phone.
-- **Draft generation** (`DraftGenerator.kt`) uses offline templates. Phase 3 calls an LLM
-  (Claude / GPT) over its HTTPS API with the transcript text to produce context-aware drafts.
-  (The app talks to the model via its API, not MCP — MCP plugs tools into a model, it isn't
-  how an app calls one.)
+### Transcription and drafts (all free)
+- **Transcription** (`Transcriber.kt`) runs **offline on the phone** with
+  [Vosk](https://alphacephei.com/vosk/) and the small Indian English model
+  (`vosk-model-small-en-in-0.4`, ~36 MB, bundled in the APK). No key, no cost, audio never
+  leaves the phone, and the recording is deleted once transcribed. CI downloads the model
+  before building; for a local build, unzip that model into `app/src/main/assets/vosk-model/`.
+  Use **Test transcription** in the app to check it on your voice.
+- **Drafts** (`DraftGenerator.kt`) work offline by default (rule-based: picks out times, days
+  and "I'll / please / need to" phrases). For smarter drafts, choose a free-tier provider in
+  the app and paste a free key:
+  - **Groq** (recommended): free key at console.groq.com/keys, default model
+    `llama-3.1-8b-instant`.
+  - **Google Gemini**: free key at aistudio.google.com/apikey, default model
+    `gemini-flash-latest`. Google may use free-tier data to improve its products.
+  - **Custom**: any OpenAI-compatible `/chat/completions` URL (OpenRouter free models, or a
+    local Ollama/LM Studio server on your network; key optional).
+
+  Cloud providers receive the transcript **text** only. If the call fails (no network, rate
+  limit, bad key) the app falls back to offline drafts.
 
 ## The one hard constraint
 
@@ -80,8 +92,8 @@ app/src/main/java/com/karan/callassistant/
   MainActivity.kt        permissions + arm/disarm + demo
   CallMonitorService.kt  foreground service, call-state detection, orchestration
   AudioRecorder.kt       mic capture to 16 kHz PCM
-  Transcriber.kt         on-device ASR (placeholder; Phase 1 hook)
-  DraftGenerator.kt      follow-up drafts (templates; Phase 3 LLM hook)
+  Transcriber.kt         offline speech-to-text (Vosk)
+  DraftGenerator.kt      follow-up drafts (offline rules or free-tier LLM) + LlmSettings
   OverlayManager.kt      post-call SYSTEM_ALERT_WINDOW pop-up
   ContactHelper.kt       caller lookup + save unknown numbers
   ShareHelper.kt         WhatsApp / Telegram / share-sheet intents

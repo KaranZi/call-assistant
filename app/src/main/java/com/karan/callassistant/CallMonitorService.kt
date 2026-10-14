@@ -155,13 +155,19 @@ class CallMonitorService : Service() {
     }
 
     private fun processCall(audioFile: File?, number: String?, sourceLabel: String, peak: Int) {
-        // 1. Transcribe (on-device). In the spike this returns a placeholder unless a
-        //    real engine is wired; the plumbing around it is what we're proving.
-        val transcript = Transcriber.transcribe(this, audioFile)
+        // 1. Transcribe on-device with Vosk (offline, free; audio stays on the phone).
+        val transcript = try {
+            Transcriber.transcribe(this, audioFile)
+        } catch (e: Exception) {
+            Log.e(TAG, "Transcription failed", e)
+            "(Transcription failed: ${e.message})"
+        }
+        // The transcript is all we need; don't keep call audio lying around.
+        audioFile?.delete()
 
-        // 2. Generate drafts from the transcript. Offline templates for now;
-        //    the LLM-API path hooks in here (see DraftGenerator).
-        val drafts = DraftGenerator.fromTranscript(transcript)
+        // 2. Drafts: free-tier LLM if a key is set in the app, else offline rule-based drafts.
+        val result = DraftGenerator.generate(this, transcript)
+        val drafts = result.drafts
 
         // 3. Resolve the contact label, and offer to save the number if unknown.
         val label = ContactHelper.labelForNumber(this, number)
@@ -172,14 +178,15 @@ class CallMonitorService : Service() {
         // Capture diagnostic: proves on a real call whether the chosen source actually
         // picked up sound (peak > ~500 ≈ real audio; ~0 = silent source, so it fell through).
         val captureLine = "[capture: $sourceLabel · peak $peak" +
-            (if (peak < 500) " → looks SILENT, likely needs speakerphone]" else "]")
+            (if (peak < 500) " → looks SILENT, likely needs speakerphone" else "") +
+            " · ${result.source}]"
 
         // 4. Show the post-call overlay on the main thread.
         mainExecutor.execute {
             OverlayManager(applicationContext).show(
                 contactLabel = label,
                 number = number ?: "Unknown",
-                transcriptPreview = "$captureLine\n${transcript.take(240)}",
+                transcriptPreview = "$captureLine\n$transcript",
                 drafts = drafts
             )
         }

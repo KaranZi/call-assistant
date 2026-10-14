@@ -13,8 +13,8 @@ android {
         // which is the whole premise of this app, and where foreground-service types apply.
         minSdk = 29
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1-spike"
+        versionCode = 2
+        versionName = "0.2"
     }
 
     buildTypes {
@@ -45,4 +45,7 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.lifecycle:lifecycle-service:2.8.4")
+    // Offline speech-to-text. JNA is needed as an AAR so its native libs are packaged.
+    implementation("com.alphacephei:vosk-android:0.3.47@aar")
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
 }

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Call Assistant</string>
-    <string name="spike_blurb">Phase 0 spike: grant permissions, arm the monitor, then make a call (on speakerphone for both sides). After you hang up a pop-up appears with suggested follow-ups. Use Demo pop-up to test the overlay without a call.</string>
+    <string name="spike_blurb">Grant permissions, arm the monitor, then make a call (on speakerphone for both sides). After you hang up, the call is transcribed on the phone and a pop-up suggests follow-up messages. Use Demo pop-up to test the overlay without a call.</string>
     <string name="status_fmt">Permissions: %1$s · Overlay: %2$s</string>
     <string name="grant_perms">1. Grant permissions</string>
     <string name="allow_overlay">2. Allow display over other apps</string>
@@ -14,4 +14,13 @@
     <string name="telegram">Telegram</string>
     <string name="share">Share</string>
     <string name="close">Close</string>
+    <string name="transcription_header">Transcription (offline, free)</string>
+    <string name="test_transcribe">Test transcription: speak for 5 seconds</string>
+    <string name="drafts_header">Follow-up drafts</string>
+    <string name="drafts_blurb">Offline works with no setup. For smarter drafts pick a free provider and paste a free key. Groq is recommended: free, fast, and it says it doesn\'t train on API data. Cloud providers receive the transcript text (never the audio).</string>
+    <string name="api_key_hint">API key (free)</string>
+    <string name="model_hint">Model (leave blank for default)</string>
+    <string name="url_hint">Custom endpoint URL (…/chat/completions)</string>
+    <string name="get_key">Get a free key for this provider</string>
+    <string name="save_test_drafts">Save and test drafts</string>
 </resources>
